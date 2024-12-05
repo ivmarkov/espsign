@@ -11,7 +11,7 @@
 //!
 //! * https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32h2/security/secure-boot-v2.html#signature-block-format
 #![no_std]
-#![warn(clippy::large_futures)] 
+#![warn(clippy::large_futures)]
 
 use alloc::boxed::Box;
 
@@ -25,7 +25,8 @@ use log::info;
 use num_bigint::{traits::ModInverse, ToBigUint};
 use num_traits::cast::ToPrimitive;
 
-use rand::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, RngCore};
+
 use rsa::{traits::PublicKeyParts, BigUint, Pss, RsaPrivateKey, RsaPublicKey};
 
 use sha2::{Digest, Sha256};
@@ -805,17 +806,17 @@ mod test {
     use core::convert::Infallible;
 
     use alloc::vec::Vec;
-    
+
     use embedded_io_async::{ErrorType, Write};
-    
+
     use super::ImageType;
-    
+
     use rand_core::{CryptoRng, RngCore};
-    
+
     use rsa::pkcs8::DecodePrivateKey;
-    
+
     extern crate alloc;
-    
+
     static PRIV_KEY: &str = r#"
 -----BEGIN PRIVATE KEY-----
 MIIG/gIBADANBgkqhkiG9w0BAQEFAASCBugwggbkAgEAAoIBgQDBBSES+nnQWeNg
@@ -858,51 +859,51 @@ PJawyWpGY6fVrQzlc56r/fCGXAyVyK79qb3A50yPIBpJAF3EGXVeY235jJAnT7mQ
 HLi+/wQ5736LzHUphwOfBDZZ
 -----END PRIVATE KEY-----
 "#;
-    
+
     static IMAGE: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    
+
     struct Rng(u8);
-    
+
     impl RngCore for Rng {
         fn next_u32(&mut self) -> u32 {
             let mut result = [0; 4];
             self.fill_bytes(&mut result);
-    
+
             u32::from_le_bytes(result)
         }
-    
+
         fn next_u64(&mut self) -> u64 {
             let mut result = [0; 8];
             self.fill_bytes(&mut result);
-    
+
             u64::from_le_bytes(result)
         }
-    
+
         fn fill_bytes(&mut self, dest: &mut [u8]) {
             for i in dest {
                 *i = self.0;
                 self.0 += 1;
             }
         }
-    
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
             self.fill_bytes(dest);
             Ok(())
         }
     }
-    
+
     impl CryptoRng for Rng {}
-    
+
     struct AsyncIo<T>(T);
-    
+
     impl<T> ErrorType for AsyncIo<T> {
         type Error = Infallible;
     }
-    
+
     impl Write for AsyncIo<&mut Vec<u8>> {
         async fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
             self.0.extend_from_slice(data);
-    
+
             Ok(data.len())
         }
     }
@@ -911,14 +912,14 @@ HLi+/wQ5736LzHUphwOfBDZZ
     #[test]
     fn test() {
         let priv_key = super::rsa::RsaPrivateKey::from_pkcs8_pem(PRIV_KEY).unwrap();
-    
+
         let mut buf = [0; 5000];
-    
+
         let mut out = Vec::new();
         let mut sha = Vec::new();
-    
+
         let mut rng = Rng(0);
-    
+
         embassy_futures::block_on(async {
             let signature = super::SBV2RsaSignatureBlock::sign(
                 &priv_key,
@@ -930,16 +931,16 @@ HLi+/wQ5736LzHUphwOfBDZZ
             )
             .await
             .unwrap();
-    
+
             signature.save_pubkey_hash(AsyncIo(&mut sha)).await.unwrap();
             assert_eq!(
                 &sha,
                 &[
-                    30, 21, 221, 150, 46, 88, 111, 119, 133, 133, 196, 203, 78, 206, 138, 61, 161, 155,
-                    150, 228, 98, 141, 122, 31, 230, 50, 91, 84, 133, 136, 157, 166
+                    30, 21, 221, 150, 46, 88, 111, 119, 133, 133, 196, 203, 78, 206, 138, 61, 161,
+                    155, 150, 228, 98, 141, 122, 31, 230, 50, 91, 84, 133, 136, 157, 166
                 ]
             );
-    
+
             super::SBV2RsaSignatureBlock::load_and_verify(
                 &mut buf,
                 &mut out.as_ref(),
