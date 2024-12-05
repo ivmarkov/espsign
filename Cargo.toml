@@ -5,7 +5,8 @@ edition = "2021"
 
 [features]
 default = ["bin"]
-bin = ["rsa/pem", "embedded-io-async/std", "rand"]
+bin = ["pem", "embedded-io-async/std", "rand"]
+pem = ["rsa/pem"]
 
 [dependencies]
 log = { version = "0.4", default-features = false }

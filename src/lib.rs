@@ -10,6 +10,9 @@
 //! would be slow(er), because the Esp RSA and SHA peripherals are not utilized yet.
 //!
 //! * https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32h2/security/secure-boot-v2.html#signature-block-format
+#![no_std]
+#![warn(clippy::large_futures)] 
+
 use alloc::boxed::Box;
 
 use core::fmt::{self, Debug, Display};
@@ -38,6 +41,12 @@ pub mod rsa {
 /// A null writer that writes to nowhere
 /// Implements the `Write` trait from `embedded-io-async`
 pub struct NullWrite<E>(PhantomData<fn() -> E>);
+
+impl<E> Default for NullWrite<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<E> NullWrite<E> {
     /// Create a new null writer
@@ -361,11 +370,11 @@ impl SBV2RsaSignatureBlock {
     ///   NOTE: The buffer should be bigger than 4096 bytes, or else this method would panic!
     /// * `image` - Image to verify
     /// * `image_type` - Type of image to verify
-    pub async fn load_and_verify<'a, R>(
-        buf: &'a mut [u8],
+    pub async fn load_and_verify<R>(
+        buf: &mut [u8],
         mut image: R,
         image_type: ImageType,
-    ) -> Result<&'a Self, VerifyError<R::Error>>
+    ) -> Result<&Self, VerifyError<R::Error>>
     where
         R: Read,
     {
@@ -788,5 +797,156 @@ impl SBV2RsaSignatureBlock {
         hasher.update(data);
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "pem"))]
+mod test {
+    use core::convert::Infallible;
+
+    use alloc::vec::Vec;
+    
+    use embedded_io_async::{ErrorType, Write};
+    
+    use super::ImageType;
+    
+    use rand_core::{CryptoRng, RngCore};
+    
+    use rsa::pkcs8::DecodePrivateKey;
+    
+    extern crate alloc;
+    
+    static PRIV_KEY: &str = r#"
+-----BEGIN PRIVATE KEY-----
+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
+HLi+/wQ5736LzHUphwOfBDZZ
+-----END PRIVATE KEY-----
+"#;
+    
+    static IMAGE: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    
+    struct Rng(u8);
+    
+    impl RngCore for Rng {
+        fn next_u32(&mut self) -> u32 {
+            let mut result = [0; 4];
+            self.fill_bytes(&mut result);
+    
+            u32::from_le_bytes(result)
+        }
+    
+        fn next_u64(&mut self) -> u64 {
+            let mut result = [0; 8];
+            self.fill_bytes(&mut result);
+    
+            u64::from_le_bytes(result)
+        }
+    
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            for i in dest {
+                *i = self.0;
+                self.0 += 1;
+            }
+        }
+    
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+            self.fill_bytes(dest);
+            Ok(())
+        }
+    }
+    
+    impl CryptoRng for Rng {}
+    
+    struct AsyncIo<T>(T);
+    
+    impl<T> ErrorType for AsyncIo<T> {
+        type Error = Infallible;
+    }
+    
+    impl Write for AsyncIo<&mut Vec<u8>> {
+        async fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
+            self.0.extend_from_slice(data);
+    
+            Ok(data.len())
+        }
+    }
+
+    /// A test that signs and then verifies an image
+    #[test]
+    fn test() {
+        let priv_key = super::rsa::RsaPrivateKey::from_pkcs8_pem(PRIV_KEY).unwrap();
+    
+        let mut buf = [0; 5000];
+    
+        let mut out = Vec::new();
+        let mut sha = Vec::new();
+    
+        let mut rng = Rng(0);
+    
+        embassy_futures::block_on(async {
+            let signature = super::SBV2RsaSignatureBlock::sign(
+                &priv_key,
+                &mut rng,
+                &mut buf,
+                IMAGE,
+                ImageType::App,
+                AsyncIo(&mut out),
+            )
+            .await
+            .unwrap();
+    
+            signature.save_pubkey_hash(AsyncIo(&mut sha)).await.unwrap();
+            assert_eq!(
+                &sha,
+                &[
+                    30, 21, 221, 150, 46, 88, 111, 119, 133, 133, 196, 203, 78, 206, 138, 61, 161, 155,
+                    150, 228, 98, 141, 122, 31, 230, 50, 91, 84, 133, 136, 157, 166
+                ]
+            );
+    
+            super::SBV2RsaSignatureBlock::load_and_verify(
+                &mut buf,
+                &mut out.as_ref(),
+                ImageType::App,
+            )
+            .await
+            .unwrap();
+        });
     }
 }
