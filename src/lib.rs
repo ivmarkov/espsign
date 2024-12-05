@@ -1,14 +1,14 @@
 //! Utilities for ESP Secure Boot V2 RSA signature block verification and signing
-//! 
+//!
 //! For now, only Secure Boot V2 is supported, with the RSA-based signature block,
-//! as this is what seemingly Espressif recommends*. In future, it can be extended 
+//! as this is what seemingly Espressif recommends*. In future, it can be extended
 //! with support for ECC signatures, as well as Secure Boot V1.
-//! 
+//!
 //! The module is `no_std` (but needs `alloc` because Rust Crypto RSA needs it)
-//! so that it can also be used on the chip itself for e.g. verifying image signatures 
-//! during OTA updates for baremetal apps. Note though that the on-chip verification 
+//! so that it can also be used on the chip itself for e.g. verifying image signatures
+//! during OTA updates for baremetal apps. Note though that the on-chip verification
 //! would be slow(er), because the Esp RSA and SHA peripherals are not utilized yet.
-//! 
+//!
 //! * https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32h2/security/secure-boot-v2.html#signature-block-format
 use alloc::boxed::Box;
 

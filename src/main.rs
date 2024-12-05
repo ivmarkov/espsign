@@ -1,14 +1,13 @@
-use std::convert::Infallible;
-
 use embedded_io_async::{ErrorType, Read, Write};
-use espsign::{ImageType, NullWrite};
+
+use espsign::ImageType;
 
 use rand::thread_rng;
 
 use rsa::pkcs8::DecodePrivateKey;
 
-static PRIV: &str = include_str!("../private-key.pem");
-static IMAGE: &[u8] = include_bytes!("../sl");
+static PRIV: &str = include_str!("../scratch/private-key.pem");
+static IMAGE: &[u8] = include_bytes!("../scratch/sl");
 
 pub struct AsyncIo<W>(W);
 
@@ -39,8 +38,8 @@ fn main() {
 
     let mut buf = [0; 8192];
 
-    let mut out = std::fs::File::create("out").unwrap();
-    let mut sha = std::fs::File::create("sha").unwrap();
+    let mut out = std::fs::File::create("scratch/out").unwrap();
+    let mut sha = std::fs::File::create("scratch/sha").unwrap();
 
     let mut rng = thread_rng();
 
@@ -61,7 +60,7 @@ fn main() {
 
     drop(out);
 
-    let out = std::fs::File::open("out").unwrap();
+    let out = std::fs::File::open("scratch/out").unwrap();
 
     embassy_futures::block_on(async {
         espsign::SBV2RsaSignatureBlock::load_and_verify(&mut buf, AsyncIo(out), ImageType::App)

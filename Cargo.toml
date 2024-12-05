@@ -3,14 +3,18 @@ name = "espsign"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["bin"]
+bin = ["rsa/pem", "embedded-io-async/std", "rand"]
+
 [dependencies]
-log = "0.4"
-sha2 = "0.10"
-rsa = { version = "0.9", features = ["getrandom", "pem"] }
-num-bigint = { version = "0.8.2", features = ["i128", "prime", "zeroize"], default-features = false, package = "num-bigint-dig" }
-num-traits = { version = "0.2.9", default-features = false, features = ["libm"] }
-crc = "3.2"
-embedded-io-async = { version = "0.6", features = ["std"] }
+log = { version = "0.4", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+rsa = { version = "0.9", default-features = false }
+num-bigint = { version = "0.8.2", default-features = false, features = ["i128", "prime", "zeroize"], package = "num-bigint-dig" }
+num-traits = { version = "0.2.9", default-features = false }
+crc = { version = "3.2", default-features = false }
+embedded-io-async = "0.6"
 embassy-futures = "0.1"
-rand = "0.8"
 rand_core = "0.6"
+rand = { version = "0.8", optional = true }
