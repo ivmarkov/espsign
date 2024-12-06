@@ -8,8 +8,41 @@ A utility for signing ESP32 firmware images for ESP RSA Secure Boot V2
 
 ## Highlights
 
-TBD
+* Pure-Rust
+* `no_std` (but needs `alloc`) library interface for:
+  * Signing
+  * Verifying
+  * Generating key SHA-256 E-FUSE signtature
+* Command line interface
+
+## Install the command line utility
+
+```sh
+cargo install --force --git https://github.com/ivmarkov/espsign
+```
 
 ## Examples
 
-TBD
+Generate a new PEM signing key in file `foo`:
+
+```sh
+espsign gen-key foo
+```
+
+Generate a new password-protected with `pass` PEM signing key in file `foo`, and with E-FUSE SHA-256 hash in file `hash`:
+
+```sh
+espsign gen-key -p pass -s hash foo
+```
+
+Sign an app image `firmware` using a pre-generated PEM signing key from file `foo`
+
+```sh
+espsign sign -k foo firmware firmware-signed
+```
+
+Verify a signed app image `firmware-signed`
+
+```sh
+espsign verify firmware-signed
+```
