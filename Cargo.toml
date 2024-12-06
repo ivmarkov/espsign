@@ -10,12 +10,12 @@ description = "A utility for signing ESP32 firmware images for ESP RSA Secure Bo
 repository = "https://github.com/ivmarkov/espsign"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.77"
+rust-version = "1.83"
 
 [features]
 default = ["bin"]
-bin = ["pem", "embedded-io-async/std", "rand"]
-pem = ["rsa/pem"]
+bin = ["pks", "rsa/std", "embedded-io-async/std", "rand", "clap", "anyhow", "env_logger"]
+pks = ["rsa/pem", "rsa/pkcs5"]
 
 [dependencies]
 log = { version = "0.4", default-features = false }
@@ -28,3 +28,6 @@ embedded-io-async = "0.6"
 embassy-futures = "0.1"
 rand_core = "0.6"
 rand = { version = "0.8", optional = true }
+clap = { version = "4", optional = true, features = ["derive"] }
+anyhow = { version = "1", optional = true }
+env_logger = { version = "0.11", optional = true }

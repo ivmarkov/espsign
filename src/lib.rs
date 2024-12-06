@@ -128,6 +128,8 @@ where
     }
 }
 
+impl<E> core::error::Error for VerifyError<E> where E: Debug {}
+
 /// Type of image to sign or verify
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum ImageType {
@@ -142,7 +144,7 @@ impl ImageType {
     pub fn align(&self) -> usize {
         match self {
             ImageType::Bootloader => 4096,
-            ImageType::App => 4096, //65536,
+            ImageType::App => 65536,
         }
     }
 }
@@ -801,7 +803,7 @@ impl SBV2RsaSignatureBlock {
     }
 }
 
-#[cfg(all(test, feature = "pem"))]
+#[cfg(all(test, feature = "pks"))]
 mod test {
     use core::convert::Infallible;
 
@@ -926,7 +928,7 @@ HLi+/wQ5736LzHUphwOfBDZZ
                 &mut rng,
                 &mut buf,
                 IMAGE,
-                ImageType::App,
+                ImageType::Bootloader,
                 AsyncIo(&mut out),
             )
             .await
@@ -944,7 +946,7 @@ HLi+/wQ5736LzHUphwOfBDZZ
             super::SBV2RsaSignatureBlock::load_and_verify(
                 &mut buf,
                 &mut out.as_ref(),
-                ImageType::App,
+                ImageType::Bootloader,
             )
             .await
             .unwrap();
