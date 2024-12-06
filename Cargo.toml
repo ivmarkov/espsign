@@ -12,6 +12,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.83"
 
+[[bin]]
+name = "espsign"
+required-features = ["bin"]
+
 [features]
 default = ["bin"]
 bin = ["pks", "rsa/std", "embedded-io-async/std", "rand", "clap", "anyhow", "env_logger"]
