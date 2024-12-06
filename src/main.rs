@@ -1,9 +1,11 @@
 //! A command-line interface to the `espsign` module.
 
 use std::io::{self, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use anyhow::Context;
+
+use clap::{ColorChoice, Parser, Subcommand, ValueEnum};
 
 use embedded_io_async::{ErrorType, Read, Write};
 
@@ -12,12 +14,14 @@ use espsign::rsa::RsaPrivateKey;
 use espsign::SBV2RsaPubKey;
 
 use log::{debug, info, LevelFilter};
+
 use rand::thread_rng;
+
 use rsa::pkcs8::LineEnding;
 
 /// Sign and verify ESP32 images for ESP RSA Secure Boot V2
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, arg_required_else_help = true, color = ColorChoice::Auto)]
 struct Cli {
     /// Verbosity
     #[arg(short = 'l', long, default_value = "regular")]
@@ -137,42 +141,43 @@ impl KeyType {
         path: &Path,
         password: Option<&str>,
     ) -> anyhow::Result<espsign::rsa::RsaPrivateKey> {
+        let path = path::absolute(path)
+            .with_context(|| format!("Parsing key path `{}` failed", path.display()))?;
+
         let key = if let Some(password) = password {
             info!(
                 "Loading password-protected signing key from `{}` (this will take some time)...",
-                path.canonicalize()?.display()
+                path.display()
             );
 
             let key = match self {
                 Self::Pem => espsign::rsa::RsaPrivateKey::from_pkcs8_encrypted_pem(
-                    &std::fs::read_to_string(path)?,
+                    &std::fs::read_to_string(path).context("Loading key failed")?,
                     password,
                 )
-                .unwrap(),
+                .context("Parsing PEM signature key failed")?,
                 Self::Der => espsign::rsa::RsaPrivateKey::from_pkcs8_encrypted_der(
-                    &std::fs::read(path)?,
+                    &std::fs::read(path).context("Loading key failed")?,
                     password,
                 )
-                .unwrap(),
+                .context("Parsing DER signature key failed")?,
             };
 
             info!("Signing key loaded");
 
             key
         } else {
-            debug!(
-                "Loading signing key from `{}`...",
-                path.canonicalize()?.display()
-            );
+            debug!("Loading signing key from `{}`...", path.display());
 
             let key = match self {
-                Self::Pem => {
-                    espsign::rsa::RsaPrivateKey::from_pkcs8_pem(&std::fs::read_to_string(path)?)
-                        .unwrap()
-                }
-                Self::Der => {
-                    espsign::rsa::RsaPrivateKey::from_pkcs8_der(&std::fs::read(path)?).unwrap()
-                }
+                Self::Pem => espsign::rsa::RsaPrivateKey::from_pkcs8_pem(
+                    &std::fs::read_to_string(path).context("Loading key failed")?,
+                )
+                .context("Parsing PEM signature key failed")?,
+                Self::Der => espsign::rsa::RsaPrivateKey::from_pkcs8_der(
+                    &std::fs::read(path).context("Loading key failed")?,
+                )
+                .context("Parsing DER signature key failed")?,
             };
 
             debug!("Signing key loaded");
@@ -184,36 +189,49 @@ impl KeyType {
     }
 
     fn save(&self, key: &RsaPrivateKey, path: &Path, password: Option<&str>) -> anyhow::Result<()> {
+        let path = path::absolute(path)
+            .with_context(|| format!("Parsing key path `{}` failed", path.display()))?;
+
         if let Some(password) = password {
             info!("Key generation complete, saving with password protection (this will take some time)...");
 
             match self {
                 Self::Pem => std::fs::write(
-                    path,
+                    &path,
                     key.to_pkcs8_encrypted_pem(thread_rng(), password.as_bytes(), LineEnding::LF)
-                        .unwrap(),
-                )?,
+                        .context("Generating PEM signature key failed")?,
+                )
+                .context("Saving key failed")?,
                 Self::Der => std::fs::write(
-                    path,
+                    &path,
                     key.to_pkcs8_encrypted_der(thread_rng(), password.as_bytes())
-                        .unwrap()
+                        .context("Generating DER signature key failed")?
                         .as_bytes(),
-                )?,
+                )
+                .context("Saving key failed")?,
             }
 
-            info!(
-                "Password-protected key saved to `{}`",
-                path.canonicalize()?.display()
-            );
+            info!("Password-protected key saved to `{}`", path.display());
         } else {
             debug!("Key generation complete, saving...");
 
             match self {
-                Self::Pem => std::fs::write(path, key.to_pkcs8_pem(LineEnding::LF).unwrap())?,
-                Self::Der => std::fs::write(path, key.to_pkcs8_der().unwrap().as_bytes())?,
+                Self::Pem => std::fs::write(
+                    &path,
+                    key.to_pkcs8_pem(LineEnding::LF)
+                        .context("Generating PEM signature key failed")?,
+                )
+                .context("Saving key failed")?,
+                Self::Der => std::fs::write(
+                    &path,
+                    key.to_pkcs8_der()
+                        .context("Generating DER signature key failed")?
+                        .as_bytes(),
+                )
+                .context("Saving key failed")?,
             }
 
-            info!("Key saved to `{}`", path.canonicalize()?.display());
+            info!("Key saved to `{}`", path.display());
         }
 
         Ok(())
@@ -248,19 +266,19 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     if let Some(command) = args.command {
-        match command {
+        let result = match command {
             Command::GenKey {
                 key_type,
                 key_password,
                 key,
                 hash,
-            } => gen_key(key_type, key_password, key, hash)?,
+            } => gen_key(key_type, key_password, key, hash),
             Command::Hash {
                 key_type,
                 key_password,
                 key,
                 hash,
-            } => hash_key(key_type, key_password, key, hash)?,
+            } => hash_key(key_type, key_password, key, hash),
             Command::Sign {
                 key_type,
                 key_password,
@@ -269,8 +287,13 @@ fn main() -> anyhow::Result<()> {
                 image,
                 signed,
                 hash,
-            } => sign_image(key_type, key_password, key, image_type, image, signed, hash)?,
-            Command::Verify { image_type, image } => verify_image(image_type, image)?,
+            } => sign_image(key_type, key_password, key, image_type, image, signed, hash),
+            Command::Verify { image_type, image } => verify_image(image_type, image),
+        };
+
+        if let Err(err) = result {
+            log::error!("{:#}", err);
+            std::process::exit(1);
         }
     }
 
@@ -285,17 +308,24 @@ fn gen_key(
 ) -> anyhow::Result<()> {
     info!("Generating RSA-3072 private key (this will take some time)...");
 
-    let priv_key = RsaPrivateKey::new(&mut thread_rng(), 3072).unwrap();
+    let priv_key =
+        RsaPrivateKey::new(&mut thread_rng(), 3072).context("Generating RSA key failed")?;
 
     key_type.save(&priv_key, &key, key_password.as_deref())?;
 
-    if let Some(hash) = hash {
-        embassy_futures::block_on(
-            SBV2RsaPubKey::create(&priv_key.to_public_key())
-                .save_hash(FileAsyncIo(std::fs::File::create(&hash)?)),
-        )?;
+    let hash = hash
+        .map(|hash| {
+            path::absolute(&hash)
+                .with_context(|| format!("Parsing hash path `{}` failed", hash.display()))
+        })
+        .transpose()?;
 
-        info!("Hash saved to `{}`", hash.canonicalize()?.display());
+    if let Some(hash) = hash {
+        embassy_futures::block_on(SBV2RsaPubKey::create(&priv_key.to_public_key()).save_hash(
+            FileAsyncIo(std::fs::File::create(&hash).context("Saving hash failed")?),
+        ))?;
+
+        info!("Hash saved to `{}`", hash.display());
     }
 
     Ok(())
@@ -309,12 +339,14 @@ fn hash_key(
 ) -> anyhow::Result<()> {
     let priv_key = key_type.load(&key, key_password.as_deref())?;
 
-    embassy_futures::block_on(
-        SBV2RsaPubKey::create(&priv_key.to_public_key())
-            .save_hash(FileAsyncIo(std::fs::File::create(&hash)?)),
-    )?;
+    let hash = path::absolute(&hash)
+        .with_context(|| format!("Parsing hash path `{}` failed", hash.display()))?;
 
-    info!("Hash saved to `{}`", hash.canonicalize()?.display());
+    embassy_futures::block_on(SBV2RsaPubKey::create(&priv_key.to_public_key()).save_hash(
+        FileAsyncIo(std::fs::File::create(&hash).context("Saving hash failed")?),
+    ))?;
+
+    info!("Hash saved to `{}`", hash.display());
 
     Ok(())
 }
@@ -332,30 +364,41 @@ fn sign_image(
 
     let priv_key = key_type.load(&key, key_password.as_deref())?;
 
-    info!("Signing image `{}`...", image.canonicalize()?.display());
+    let image = path::absolute(&image)
+        .with_context(|| format!("Parsing image path `{}` failed", image.display()))?;
+
+    info!("Signing image `{}`...", image.display());
+
+    let signed = path::absolute(&signed)
+        .with_context(|| format!("Parsing signed image path `{}` failed", signed.display()))?;
+    let hash = hash
+        .map(|hash| {
+            path::absolute(&hash)
+                .with_context(|| format!("Parsing hash path `{}` failed", hash.display()))
+        })
+        .transpose()?;
 
     embassy_futures::block_on(async {
         let block = espsign::SBV2RsaSignatureBlock::sign(
             &priv_key,
             &mut thread_rng(),
             &mut buf,
-            FileAsyncIo(std::fs::File::open(image)?),
+            FileAsyncIo(std::fs::File::open(image).context("Loading image failed")?),
             image_type.into(),
-            FileAsyncIo(std::fs::File::create(&signed)?),
+            FileAsyncIo(std::fs::File::create(&signed).context("Saving signed image failed")?),
         )
         .await?;
 
-        info!(
-            "Image signed and saved to `{}`",
-            signed.canonicalize()?.display()
-        );
+        info!("Image signed and saved to `{}`", signed.display());
 
         if let Some(hash) = hash {
             block
-                .save_pubkey_hash(FileAsyncIo(std::fs::File::create(&hash)?))
+                .save_pubkey_hash(FileAsyncIo(
+                    std::fs::File::create(&hash).context("Saving hash failed")?,
+                ))
                 .await?;
 
-            info!("Hash saved to `{}`", hash.canonicalize()?.display());
+            info!("Hash saved to `{}`", hash.display());
         }
 
         Ok::<_, anyhow::Error>(())
@@ -365,13 +408,16 @@ fn sign_image(
 }
 
 fn verify_image(image_type: ImageType, image: PathBuf) -> anyhow::Result<()> {
-    info!("Verifying image `{}`...", image.canonicalize()?.display());
+    let image = path::absolute(&image)
+        .with_context(|| format!("Parsing image path `{}` failed", image.display()))?;
+
+    info!("Verifying image `{}`...", image.display());
 
     let mut buf = [0; 8192];
 
     embassy_futures::block_on(espsign::SBV2RsaSignatureBlock::load_and_verify(
         &mut buf,
-        FileAsyncIo(std::fs::File::open(image)?),
+        FileAsyncIo(std::fs::File::open(image).context("Loading image failed")?),
         image_type.into(),
     ))?;
 

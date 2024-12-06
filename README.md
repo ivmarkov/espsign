@@ -9,10 +9,10 @@ A utility for signing ESP32 firmware images for ESP RSA Secure Boot V2
 ## Highlights
 
 * Pure-Rust
-* `no_std` (but needs `alloc`) library interface for:
+* `no_std` (but needs `alloc`) **library interface** for:
   * Signing
   * Verifying
-  * Generating key SHA-256 E-FUSE signtature
+  * Generating key SHA-256 E-FUSE signature
 * Command line interface
 
 ## Install the command line utility
