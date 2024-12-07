@@ -1,4 +1,4 @@
-//! A command-line interface to the `espsign` module.
+//! A command-line interface to the `espsign` crate.
 
 use std::io::{self, Write as _};
 use std::path::{self, Path, PathBuf};
