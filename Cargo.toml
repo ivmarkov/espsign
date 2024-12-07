@@ -18,7 +18,8 @@ required-features = ["bin"]
 
 [features]
 default = ["bin"]
-bin = ["pks", "rsa/std", "embedded-io-async/std", "rand", "clap", "anyhow", "env_logger"]
+bin = ["std", "clap", "anyhow"]
+std = ["pks", "rsa/std", "embedded-io-async/std", "rand", "env_logger"]
 pks = ["rsa/pem", "rsa/pkcs5"]
 
 [dependencies]
@@ -35,3 +36,13 @@ rand = { version = "0.8", optional = true }
 clap = { version = "4", optional = true, features = ["derive"] }
 anyhow = { version = "1", optional = true }
 env_logger = { version = "0.11", optional = true }
+
+[[example]]
+name = "sign"
+path = "examples/sign.rs"
+required-features = ["std"]
+
+[[example]]
+name = "verify"
+path = "examples/verify.rs"
+required-features = ["std"]

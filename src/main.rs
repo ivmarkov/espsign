@@ -1,17 +1,16 @@
 //! A command-line interface to the `espsign` crate.
 
-use std::io::{self, Write as _};
+use std::fs::{self, File};
+use std::io::Write as _;
 use std::path::{self, Path, PathBuf};
 
 use anyhow::Context;
 
 use clap::{ColorChoice, Parser, Subcommand, ValueEnum};
 
-use embedded_io_async::{ErrorType, Read, Write};
-
 use espsign::rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use espsign::rsa::RsaPrivateKey;
-use espsign::SBV2RsaPubKey;
+use espsign::{AsyncIo, SBV2RsaPubKey};
 
 use log::{debug, info, LevelFilter};
 
@@ -136,11 +135,7 @@ enum KeyType {
 }
 
 impl KeyType {
-    fn load(
-        &self,
-        path: &Path,
-        password: Option<&str>,
-    ) -> anyhow::Result<espsign::rsa::RsaPrivateKey> {
+    fn load(&self, path: &Path, password: Option<&str>) -> anyhow::Result<RsaPrivateKey> {
         let path = path::absolute(path)
             .with_context(|| format!("Parsing key path `{}` failed", path.display()))?;
 
@@ -151,13 +146,13 @@ impl KeyType {
             );
 
             let key = match self {
-                Self::Pem => espsign::rsa::RsaPrivateKey::from_pkcs8_encrypted_pem(
-                    &std::fs::read_to_string(path).context("Loading key failed")?,
+                Self::Pem => RsaPrivateKey::from_pkcs8_encrypted_pem(
+                    &fs::read_to_string(path).context("Loading key failed")?,
                     password,
                 )
                 .context("Parsing PEM signature key failed")?,
-                Self::Der => espsign::rsa::RsaPrivateKey::from_pkcs8_encrypted_der(
-                    &std::fs::read(path).context("Loading key failed")?,
+                Self::Der => RsaPrivateKey::from_pkcs8_encrypted_der(
+                    &fs::read(path).context("Loading key failed")?,
                     password,
                 )
                 .context("Parsing DER signature key failed")?,
@@ -170,14 +165,14 @@ impl KeyType {
             debug!("Loading signing key from `{}`...", path.display());
 
             let key = match self {
-                Self::Pem => espsign::rsa::RsaPrivateKey::from_pkcs8_pem(
-                    &std::fs::read_to_string(path).context("Loading key failed")?,
+                Self::Pem => RsaPrivateKey::from_pkcs8_pem(
+                    &fs::read_to_string(path).context("Loading key failed")?,
                 )
                 .context("Parsing PEM signature key failed")?,
-                Self::Der => espsign::rsa::RsaPrivateKey::from_pkcs8_der(
-                    &std::fs::read(path).context("Loading key failed")?,
-                )
-                .context("Parsing DER signature key failed")?,
+                Self::Der => {
+                    RsaPrivateKey::from_pkcs8_der(&fs::read(path).context("Loading key failed")?)
+                        .context("Parsing DER signature key failed")?
+                }
             };
 
             debug!("Signing key loaded");
@@ -196,13 +191,13 @@ impl KeyType {
             info!("Key generation complete, saving with password protection (this will take some time)...");
 
             match self {
-                Self::Pem => std::fs::write(
+                Self::Pem => fs::write(
                     &path,
                     key.to_pkcs8_encrypted_pem(thread_rng(), password.as_bytes(), LineEnding::LF)
                         .context("Generating PEM signature key failed")?,
                 )
                 .context("Saving key failed")?,
-                Self::Der => std::fs::write(
+                Self::Der => fs::write(
                     &path,
                     key.to_pkcs8_encrypted_der(thread_rng(), password.as_bytes())
                         .context("Generating DER signature key failed")?
@@ -216,13 +211,13 @@ impl KeyType {
             debug!("Key generation complete, saving...");
 
             match self {
-                Self::Pem => std::fs::write(
+                Self::Pem => fs::write(
                     &path,
                     key.to_pkcs8_pem(LineEnding::LF)
                         .context("Generating PEM signature key failed")?,
                 )
                 .context("Saving key failed")?,
-                Self::Der => std::fs::write(
+                Self::Der => fs::write(
                     &path,
                     key.to_pkcs8_der()
                         .context("Generating DER signature key failed")?
@@ -322,7 +317,7 @@ fn gen_key(
 
     if let Some(hash) = hash {
         embassy_futures::block_on(SBV2RsaPubKey::create(&priv_key.to_public_key()).save_hash(
-            FileAsyncIo(std::fs::File::create(&hash).context("Saving hash failed")?),
+            AsyncIo::new(File::create(&hash).context("Saving hash failed")?),
         ))?;
 
         info!("Hash saved to `{}`", hash.display());
@@ -343,7 +338,7 @@ fn hash_key(
         .with_context(|| format!("Parsing hash path `{}` failed", hash.display()))?;
 
     embassy_futures::block_on(SBV2RsaPubKey::create(&priv_key.to_public_key()).save_hash(
-        FileAsyncIo(std::fs::File::create(&hash).context("Saving hash failed")?),
+        AsyncIo::new(File::create(&hash).context("Saving hash failed")?),
     ))?;
 
     info!("Hash saved to `{}`", hash.display());
@@ -383,9 +378,9 @@ fn sign_image(
             &priv_key,
             &mut thread_rng(),
             &mut buf,
-            FileAsyncIo(std::fs::File::open(image).context("Loading image failed")?),
+            AsyncIo::new(File::open(image).context("Loading image failed")?),
             image_type.into(),
-            FileAsyncIo(std::fs::File::create(&signed).context("Saving signed image failed")?),
+            AsyncIo::new(File::create(&signed).context("Saving signed image failed")?),
         )
         .await?;
 
@@ -393,8 +388,8 @@ fn sign_image(
 
         if let Some(hash) = hash {
             block
-                .save_pubkey_hash(FileAsyncIo(
-                    std::fs::File::create(&hash).context("Saving hash failed")?,
+                .save_pubkey_hash(AsyncIo::new(
+                    File::create(&hash).context("Saving hash failed")?,
                 ))
                 .await?;
 
@@ -417,36 +412,11 @@ fn verify_image(image_type: ImageType, image: PathBuf) -> anyhow::Result<()> {
 
     embassy_futures::block_on(espsign::SBV2RsaSignatureBlock::load_and_verify(
         &mut buf,
-        FileAsyncIo(std::fs::File::open(image).context("Loading image failed")?),
+        AsyncIo::new(File::open(image).context("Loading image failed")?),
         image_type.into(),
     ))?;
 
     info!("Image verified successfully");
 
     Ok(())
-}
-
-/// A wrapper for types implementing `std::io::Read` and `std::io::Write` to implement `Read` and `Write` for async I/O.
-struct FileAsyncIo<T>(T);
-
-impl<T> ErrorType for FileAsyncIo<T> {
-    type Error = io::Error;
-}
-
-impl<T> Read for FileAsyncIo<T>
-where
-    T: std::io::Read,
-{
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.0.read(buf)
-    }
-}
-
-impl<T> Write for FileAsyncIo<T>
-where
-    T: std::io::Write,
-{
-    async fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
-        self.0.write(data)
-    }
 }

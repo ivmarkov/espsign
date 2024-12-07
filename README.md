@@ -15,13 +15,15 @@ A utility for signing ESP32 firmware images for ESP RSA Secure Boot V2
   * Generating key SHA-256 E-FUSE signature
 * Command line interface
 
-## Install the command line utility
+## Examples
+
+### Command line
+
+Install the command line utility
 
 ```sh
 cargo install --force --git https://github.com/ivmarkov/espsign
 ```
-
-## Examples
 
 Generate a new PEM signing key in file `foo`:
 
@@ -45,4 +47,35 @@ Verify a signed app image `firmware-signed`
 
 ```sh
 espsign verify firmware-signed
+```
+
+### Library
+
+Verify an image. [Other examples](examples).
+
+```rust
+use std::fs::File;
+use std::path::PathBuf;
+
+use log::info;
+
+use espsign::{AsyncIo, ImageType, SBV2RsaSignatureBlock};
+
+/// Verify that `image` is properly signed
+fn main() {
+    let image = PathBuf::from("/home/foo/factory-app-signed");
+
+    let mut buf = [0; 65536];
+
+    info!("Verifying image `{}`...", image.display());
+
+    embassy_futures::block_on(SBV2RsaSignatureBlock::load_and_verify(
+        &mut buf,
+        AsyncIo::new(File::open(image).unwrap()),
+        ImageType::App,
+    ))
+    .unwrap();
+
+    info!("Image verified successfully");
+}
 ```

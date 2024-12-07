@@ -33,6 +33,9 @@ use sha2::{Digest, Sha256};
 
 extern crate alloc;
 
+#[cfg(feature = "std")]
+pub use std::*;
+
 /// The RSA crate is re-exported for user convenience
 /// so that users of the lib do not have to explicitly depend on it
 pub mod rsa {
@@ -800,6 +803,47 @@ impl SBV2RsaSignatureBlock {
         hasher.update(data);
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "std")]
+mod std {
+    use std::io;
+
+    use embedded_io_async::{ErrorType, Read, Write};
+
+    extern crate std;
+
+    /// A blocking wrapper for types implementing `std::io::Read` and `std::io::Write` to implement `Read` and `Write` for async I/O.
+    pub struct AsyncIo<T>(T);
+
+    impl<T> AsyncIo<T> {
+        /// Create a new `FileAsyncIo` from the inner type.
+        pub const fn new(inner: T) -> Self {
+            Self(inner)
+        }
+    }
+
+    impl<T> ErrorType for AsyncIo<T> {
+        type Error = io::Error;
+    }
+
+    impl<T> Read for AsyncIo<T>
+    where
+        T: io::Read,
+    {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            self.0.read(buf)
+        }
+    }
+
+    impl<T> Write for AsyncIo<T>
+    where
+        T: io::Write,
+    {
+        async fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
+            self.0.write(data)
+        }
     }
 }
 
