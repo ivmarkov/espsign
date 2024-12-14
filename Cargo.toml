@@ -10,7 +10,7 @@ description = "A utility for signing ESP32 firmware images for ESP RSA Secure Bo
 repository = "https://github.com/ivmarkov/espsign"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.83"
+rust-version = "1.82"
 
 [[bin]]
 name = "espsign"
