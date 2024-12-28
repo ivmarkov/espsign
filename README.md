@@ -40,7 +40,13 @@ espsign gen-key -p pass -s hash foo
 Sign an app image `firmware` using a pre-generated PEM signing key from file `foo`
 
 ```sh
-espsign sign -k foo firmware firmware-signed
+espsign sign -k foo firmware-padded firmware-signed
+```
+
+> NOTE: App image should first be padded to 64K alignment with e.g. [esptools](https://github.com/ivmarkov/esptools):
+
+```sh
+esptools tool --chip esp32s3 elf2image --version 2 --secure-pad-v2 --output firmware-padded firmware
 ```
 
 Verify a signed app image `firmware-signed`

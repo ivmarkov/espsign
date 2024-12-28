@@ -20,7 +20,7 @@ use core::marker::PhantomData;
 
 use embedded_io_async::{Error, ErrorType, Read, ReadExactError, Write};
 
-use log::info;
+use log::error;
 
 use num_bigint::{traits::ModInverse, ToBigUint};
 use num_traits::cast::ToPrimitive;
@@ -74,6 +74,39 @@ where
         Ok(data.len())
     }
 }
+
+/// Errors that can occur during verification
+#[derive(Debug)]
+pub enum SignError<E> {
+    /// IO error
+    Io(E),
+    /// Signed image is not padded correctly (to 64K for app images and to 4K for bootloader images)
+    InvalidImageLen,
+}
+
+impl<E> SignError<E> {
+    /// Map the IO error to another one
+    pub fn map<E2>(self, f: impl FnOnce(E) -> E2) -> SignError<E2> {
+        match self {
+            SignError::Io(e) => SignError::Io(f(e)),
+            SignError::InvalidImageLen => SignError::InvalidImageLen,
+        }
+    }
+}
+
+impl<E> Display for SignError<E>
+where
+    E: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "IO error: {:?}", e),
+            Self::InvalidImageLen => write!(f, "Invalid image length"),
+        }
+    }
+}
+
+impl<E> core::error::Error for SignError<E> where E: Debug {}
 
 /// Errors that can occur during verification
 #[derive(Debug)]
@@ -355,7 +388,7 @@ impl SBV2RsaSignatureBlock {
         image: R,
         image_type: ImageType,
         mut out: W,
-    ) -> Result<Self, R::Error>
+    ) -> Result<Self, SignError<R::Error>>
     where
         C: RngCore + CryptoRng,
         R: Read,
@@ -364,7 +397,11 @@ impl SBV2RsaSignatureBlock {
     {
         let block = Self::create(priv_key, rng, buf, image, image_type, Some(&mut out)).await?;
 
-        block.save(out, Some(buf)).await.map_err(Into::into)?;
+        block
+            .save(out, Some(buf))
+            .await
+            .map_err(Into::<R::Error>::into)
+            .map_err(SignError::Io)?;
 
         Ok(block)
     }
@@ -449,7 +486,7 @@ impl SBV2RsaSignatureBlock {
         image: R,
         image_type: ImageType,
         out: Option<W>,
-    ) -> Result<Self, R::Error>
+    ) -> Result<Self, SignError<R::Error>>
     where
         C: RngCore + CryptoRng,
         R: Read,
@@ -572,7 +609,6 @@ impl SBV2RsaSignatureBlock {
             image,
             Option::<NullWrite<R::Error>>::None,
             image_type.align(),
-            true,
         )
         .await
         .map_err(VerifyError::Io)?;
@@ -644,7 +680,7 @@ impl SBV2RsaSignatureBlock {
         image: R,
         out: Option<W>,
         align: usize,
-    ) -> Result<(), R::Error>
+    ) -> Result<(), SignError<R::Error>>
     where
         C: RngCore + CryptoRng,
         R: Read,
@@ -690,7 +726,7 @@ impl SBV2RsaSignatureBlock {
         image: R,
         out: Option<W>,
         align: usize,
-    ) -> Result<(), R::Error>
+    ) -> Result<(), SignError<R::Error>>
     where
         R: Read,
         W: Write,
@@ -698,7 +734,12 @@ impl SBV2RsaSignatureBlock {
     {
         let mut hasher = Sha256::new();
 
-        Self::read_write_hash(&mut hasher, buf, image, out, align, false).await?;
+        if !Self::read_write_hash(&mut hasher, buf, image, out, align)
+            .await
+            .map_err(SignError::Io)?
+        {
+            Err(SignError::InvalidImageLen)?; // Image size is not a multiple of align
+        }
 
         self.sha256.copy_from_slice(hasher.finalize().as_ref());
 
@@ -740,7 +781,6 @@ impl SBV2RsaSignatureBlock {
         mut image: R,
         mut out: Option<W>,
         align: usize,
-        check_align: bool,
     ) -> Result<bool, R::Error>
     where
         R: Read,
@@ -762,29 +802,14 @@ impl SBV2RsaSignatureBlock {
             size += read;
         }
 
-        let mut remainder = align - size % align;
+        let remainder = align - size % align;
 
         if remainder != align {
-            if check_align {
-                return Ok(false);
-            }
-
-            info!("Image size ({size}B) is not a multiple of {align}B. Padding {remainder}B with 0xFF");
-
-            buf.fill(0xff);
-
-            while remainder > 0 {
-                let to_write = remainder.min(buf.len());
-
-                Self::write_hash(hasher, &buf[..to_write], out.as_mut())
-                    .await
-                    .map_err(Into::into)?;
-
-                remainder -= to_write;
-            }
+            error!("Image size ({size}B) is not a multiple of {align}B");
+            Ok(false)
+        } else {
+            Ok(true)
         }
-
-        Ok(true)
     }
 
     /// Write data to the hasher and to the optional output
@@ -966,12 +991,17 @@ HLi+/wQ5736LzHUphwOfBDZZ
 
         let mut rng = Rng(0);
 
+        let mut padded_image = [0; 4096];
+        padded_image[..IMAGE.len()].copy_from_slice(IMAGE);
+
+        let padded_image: &[u8] = &padded_image;
+
         embassy_futures::block_on(async {
             let signature = super::SBV2RsaSignatureBlock::sign(
                 &priv_key,
                 &mut rng,
                 &mut buf,
-                IMAGE,
+                padded_image,
                 ImageType::Bootloader,
                 AsyncIo(&mut out),
             )
