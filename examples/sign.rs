@@ -7,7 +7,7 @@ use rand::thread_rng;
 
 use espsign::rsa::pkcs8::DecodePrivateKey;
 use espsign::rsa::RsaPrivateKey;
-use espsign::{AsyncIo, ImageType, SBV2RsaSignatureBlock};
+use espsign::{AsyncIo, SBV2RsaSignatureBlock};
 
 /// Sign `image` with private key `key` and save the signed image as `signed`.
 /// Also, generate the hash of the private key and save it as `hash`
@@ -29,7 +29,6 @@ fn main() {
             &mut thread_rng(),
             &mut buf,
             AsyncIo::new(File::open(image).unwrap()),
-            ImageType::App,
             AsyncIo::new(File::create(&signed).unwrap()),
         )
         .await

@@ -80,10 +80,6 @@ enum Command {
         #[arg(short = 'p', long)]
         key_password: Option<String>,
 
-        /// Image type
-        #[arg(short, long, default_value = "app")]
-        image_type: ImageType,
-
         /// Verifying key E-FUSE SHA-256 hash output file (optional)
         #[arg(short = 's', long)]
         hash: Option<PathBuf>,
@@ -96,10 +92,6 @@ enum Command {
     },
     /// Verify an already signed image using its embedded signature block
     Verify {
-        /// Image type
-        #[arg(short, long, default_value = "app")]
-        image_type: ImageType,
-
         /// The image file to verify
         image: PathBuf,
     },
@@ -233,25 +225,6 @@ impl KeyType {
     }
 }
 
-/// Image type
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum ImageType {
-    /// App image
-    #[default]
-    App,
-    /// Bootloader image
-    Bootloader,
-}
-
-impl From<ImageType> for espsign::ImageType {
-    fn from(image_type: ImageType) -> Self {
-        match image_type {
-            ImageType::App => Self::App,
-            ImageType::Bootloader => Self::Bootloader,
-        }
-    }
-}
-
 fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
 
@@ -278,12 +251,11 @@ fn main() -> anyhow::Result<()> {
                 key_type,
                 key_password,
                 key,
-                image_type,
                 image,
                 signed,
                 hash,
-            } => sign_image(key_type, key_password, key, image_type, image, signed, hash),
-            Command::Verify { image_type, image } => verify_image(image_type, image),
+            } => sign_image(key_type, key_password, key, image, signed, hash),
+            Command::Verify { image } => verify_image(image),
         };
 
         if let Err(err) = result {
@@ -350,7 +322,6 @@ fn sign_image(
     key_type: KeyType,
     key_password: Option<String>,
     key: PathBuf,
-    image_type: ImageType,
     image: PathBuf,
     signed: PathBuf,
     hash: Option<PathBuf>,
@@ -379,7 +350,6 @@ fn sign_image(
             &mut thread_rng(),
             &mut buf,
             AsyncIo::new(File::open(image).context("Loading image failed")?),
-            image_type.into(),
             AsyncIo::new(File::create(&signed).context("Saving signed image failed")?),
         )
         .await?;
@@ -402,7 +372,7 @@ fn sign_image(
     Ok(())
 }
 
-fn verify_image(image_type: ImageType, image: PathBuf) -> anyhow::Result<()> {
+fn verify_image(image: PathBuf) -> anyhow::Result<()> {
     let image = path::absolute(&image)
         .with_context(|| format!("Parsing image path `{}` failed", image.display()))?;
 
@@ -413,7 +383,6 @@ fn verify_image(image_type: ImageType, image: PathBuf) -> anyhow::Result<()> {
     embassy_futures::block_on(espsign::SBV2RsaSignatureBlock::load_and_verify(
         &mut buf,
         AsyncIo::new(File::open(image).context("Loading image failed")?),
-        image_type.into(),
     ))?;
 
     info!("Image verified successfully");

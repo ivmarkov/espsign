@@ -59,7 +59,7 @@ use std::path::PathBuf;
 
 use log::info;
 
-use espsign::{AsyncIo, ImageType, SBV2RsaSignatureBlock};
+use espsign::{AsyncIo, SBV2RsaSignatureBlock};
 
 /// Verify that `image` is properly signed
 fn main() {
@@ -72,7 +72,6 @@ fn main() {
     embassy_futures::block_on(SBV2RsaSignatureBlock::load_and_verify(
         &mut buf,
         AsyncIo::new(File::open(image).unwrap()),
-        ImageType::App,
     ))
     .unwrap();
 

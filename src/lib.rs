@@ -133,25 +133,6 @@ where
 
 impl<E> core::error::Error for VerifyError<E> where E: Debug {}
 
-/// Type of image to sign or verify
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub enum ImageType {
-    /// Bootloader image (image will/should be padded to 4K boundary)
-    Bootloader,
-    /// Application image (image will/should be padded to 64K boundary)
-    App,
-}
-
-impl ImageType {
-    /// Get the alignment for the image type
-    pub fn align(&self) -> usize {
-        match self {
-            ImageType::Bootloader => 4096,
-            ImageType::App => 65536,
-        }
-    }
-}
-
 /// ESP Secure Boot V2 RSA Public key
 ///
 /// Embedded in the signature block below, as well as used as-is for
@@ -353,7 +334,6 @@ impl SBV2RsaSignatureBlock {
         rng: &mut C,
         buf: &mut [u8],
         image: R,
-        image_type: ImageType,
         mut out: W,
     ) -> Result<Self, R::Error>
     where
@@ -362,7 +342,7 @@ impl SBV2RsaSignatureBlock {
         W: Write,
         W::Error: Into<R::Error>,
     {
-        let block = Self::create(priv_key, rng, buf, image, image_type, Some(&mut out)).await?;
+        let block = Self::create(priv_key, rng, buf, image, Some(&mut out)).await?;
 
         block.save(out, Some(buf)).await.map_err(Into::into)?;
 
@@ -379,7 +359,6 @@ impl SBV2RsaSignatureBlock {
     pub async fn load_and_verify<R>(
         buf: &mut [u8],
         mut image: R,
-        image_type: ImageType,
     ) -> Result<&Self, VerifyError<R::Error>>
     where
         R: Read,
@@ -411,7 +390,7 @@ impl SBV2RsaSignatureBlock {
             }
         }
 
-        if offset != Self::PAGE_SIZE || (size - Self::PAGE_SIZE) % image_type.align() != 0 {
+        if offset != Self::PAGE_SIZE || (size - Self::PAGE_SIZE) % Self::PAGE_SIZE != 0 {
             Err(VerifyError::InvalidImageLen)?;
         }
 
@@ -447,7 +426,6 @@ impl SBV2RsaSignatureBlock {
         rng: &mut C,
         buf: &mut [u8],
         image: R,
-        image_type: ImageType,
         out: Option<W>,
     ) -> Result<Self, R::Error>
     where
@@ -458,9 +436,7 @@ impl SBV2RsaSignatureBlock {
     {
         let mut block = Self::new_empty();
 
-        block
-            .fill(priv_key, rng, buf, image, out, image_type.align())
-            .await?;
+        block.fill(priv_key, rng, buf, image, out).await?;
 
         Ok(block)
     }
@@ -555,12 +531,7 @@ impl SBV2RsaSignatureBlock {
     /// * `buf` - Buffer to use for reading the image.
     /// * `image` - Image to verify
     /// * `image_type` - Type of image to verify
-    pub async fn verify<R>(
-        &self,
-        buf: &mut [u8],
-        image: R,
-        image_type: ImageType,
-    ) -> Result<(), VerifyError<R::Error>>
+    pub async fn verify<R>(&self, buf: &mut [u8], image: R) -> Result<(), VerifyError<R::Error>>
     where
         R: Read,
     {
@@ -571,7 +542,6 @@ impl SBV2RsaSignatureBlock {
             buf,
             image,
             Option::<NullWrite<R::Error>>::None,
-            image_type.align(),
             true,
         )
         .await
@@ -643,7 +613,6 @@ impl SBV2RsaSignatureBlock {
         buf: &mut [u8],
         image: R,
         out: Option<W>,
-        align: usize,
     ) -> Result<(), R::Error>
     where
         C: RngCore + CryptoRng,
@@ -653,7 +622,7 @@ impl SBV2RsaSignatureBlock {
     {
         self.clear();
         self.fill_pub_key(&priv_key.to_public_key());
-        self.fill_hash(buf, image, out, align).await?;
+        self.fill_hash(buf, image, out).await?;
         self.fill_signature(rng, priv_key);
         self.fill_crc32();
 
@@ -689,7 +658,6 @@ impl SBV2RsaSignatureBlock {
         buf: &mut [u8],
         image: R,
         out: Option<W>,
-        align: usize,
     ) -> Result<(), R::Error>
     where
         R: Read,
@@ -698,7 +666,7 @@ impl SBV2RsaSignatureBlock {
     {
         let mut hasher = Sha256::new();
 
-        Self::read_write_hash(&mut hasher, buf, image, out, align, false).await?;
+        Self::read_write_hash(&mut hasher, buf, image, out, false).await?;
 
         self.sha256.copy_from_slice(hasher.finalize().as_ref());
 
@@ -739,7 +707,6 @@ impl SBV2RsaSignatureBlock {
         buf: &mut [u8],
         mut image: R,
         mut out: Option<W>,
-        align: usize,
         check_align: bool,
     ) -> Result<bool, R::Error>
     where
@@ -762,14 +729,17 @@ impl SBV2RsaSignatureBlock {
             size += read;
         }
 
-        let mut remainder = align - size % align;
+        let mut remainder = Self::PAGE_SIZE - size % Self::PAGE_SIZE;
 
-        if remainder != align {
+        if remainder != Self::PAGE_SIZE {
             if check_align {
                 return Ok(false);
             }
 
-            info!("Image size ({size}B) is not a multiple of {align}B. Padding {remainder}B with 0xFF");
+            info!(
+                "Image size ({size}B) is not a multiple of {}B. Padding {remainder}B with 0xFF",
+                Self::PAGE_SIZE
+            );
 
             buf.fill(0xff);
 
@@ -854,8 +824,6 @@ mod test {
     use alloc::vec::Vec;
 
     use embedded_io_async::{ErrorType, Write};
-
-    use super::ImageType;
 
     use rand_core::{CryptoRng, RngCore};
 
@@ -972,7 +940,6 @@ HLi+/wQ5736LzHUphwOfBDZZ
                 &mut rng,
                 &mut buf,
                 IMAGE,
-                ImageType::Bootloader,
                 AsyncIo(&mut out),
             )
             .await
@@ -987,13 +954,9 @@ HLi+/wQ5736LzHUphwOfBDZZ
                 ]
             );
 
-            super::SBV2RsaSignatureBlock::load_and_verify(
-                &mut buf,
-                &mut out.as_ref(),
-                ImageType::Bootloader,
-            )
-            .await
-            .unwrap();
+            super::SBV2RsaSignatureBlock::load_and_verify(&mut buf, &mut out.as_ref())
+                .await
+                .unwrap();
         });
     }
 }
