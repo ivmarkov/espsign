@@ -20,7 +20,7 @@ use core::marker::PhantomData;
 
 use embedded_io_async::{Error, ErrorType, Read, ReadExactError, Write};
 
-use log::error;
+use log::{error, info};
 
 use num_bigint::{traits::ModInverse, ToBigUint};
 use num_traits::cast::ToPrimitive;
@@ -333,9 +333,9 @@ impl SBV2RsaPubKey {
 /// Algorithms based on https://github.com/espressif/esptool/blob/master/espsecure
 ///
 /// Note 1: The rest of the 4K page/sector containing the signature should be filled with 0xFF.
-/// Note 2: APP images are padded to 64K (!) boundary with 0xFFs, so the signature block is the
-///         first 4K block following the 64K aligned and padded image
-///         ESP IDF bootloader image seems to only be padded to 4K boundary
+/// Note 2: App images SHOULD be padded to 64K (!) boundary in advance, so the signature block is the
+///         first 4K block following the 64K aligned and padded app image
+///         ESP IDF bootloader images need to only be padded to 4K boundary and this is done by `espsign` automatically
 /// Note 3: The partition table - at least with Secure Boot V2 - seems unsigned
 #[repr(C)]
 #[repr(packed)]
@@ -496,7 +496,7 @@ impl SBV2RsaSignatureBlock {
         let mut block = Self::new_empty();
 
         block
-            .fill(priv_key, rng, buf, image, out, image_type.align())
+            .fill(priv_key, rng, buf, image, out, image_type)
             .await?;
 
         Ok(block)
@@ -608,7 +608,8 @@ impl SBV2RsaSignatureBlock {
             buf,
             image,
             Option::<NullWrite<R::Error>>::None,
-            image_type.align(),
+            image_type,
+            false, /*pad*/
         )
         .await
         .map_err(VerifyError::Io)?;
@@ -679,7 +680,7 @@ impl SBV2RsaSignatureBlock {
         buf: &mut [u8],
         image: R,
         out: Option<W>,
-        align: usize,
+        image_type: ImageType,
     ) -> Result<(), SignError<R::Error>>
     where
         C: RngCore + CryptoRng,
@@ -689,7 +690,7 @@ impl SBV2RsaSignatureBlock {
     {
         self.clear();
         self.fill_pub_key(&priv_key.to_public_key());
-        self.fill_hash(buf, image, out, align).await?;
+        self.fill_hash(buf, image, out, image_type, true).await?;
         self.fill_signature(rng, priv_key);
         self.fill_crc32();
 
@@ -725,7 +726,8 @@ impl SBV2RsaSignatureBlock {
         buf: &mut [u8],
         image: R,
         out: Option<W>,
-        align: usize,
+        image_type: ImageType,
+        pad: bool,
     ) -> Result<(), SignError<R::Error>>
     where
         R: Read,
@@ -734,7 +736,7 @@ impl SBV2RsaSignatureBlock {
     {
         let mut hasher = Sha256::new();
 
-        if !Self::read_write_hash(&mut hasher, buf, image, out, align)
+        if !Self::read_write_hash(&mut hasher, buf, image, out, image_type, pad)
             .await
             .map_err(SignError::Io)?
         {
@@ -780,7 +782,8 @@ impl SBV2RsaSignatureBlock {
         buf: &mut [u8],
         mut image: R,
         mut out: Option<W>,
-        align: usize,
+        image_type: ImageType,
+        pad: bool,
     ) -> Result<bool, R::Error>
     where
         R: Read,
@@ -802,11 +805,34 @@ impl SBV2RsaSignatureBlock {
             size += read;
         }
 
-        let remainder = align - size % align;
+        let align = image_type.align();
+        let mut remainder = align - size % align;
 
         if remainder != align {
-            error!("Image size ({size}B) is not a multiple of {align}B");
-            Ok(false)
+            if pad {
+                if matches!(image_type, ImageType::App) {
+                    error!("App image size ({size}B) is not a multiple of {align}B. Padding requested, but can't pad App images.");
+                    Ok(false)
+                } else {
+                    info!("Bootloader image size ({size}B) is not a multiple of {align}B. Padding {remainder}B with 0xFF");
+
+                    buf.fill(0xff);
+
+                    while remainder > 0 {
+                        let to_write = remainder.min(buf.len());
+
+                        Self::write_hash(hasher, &buf[..to_write], out.as_mut())
+                            .await
+                            .map_err(Into::into)?;
+
+                        remainder -= to_write;
+                    }
+
+                    Ok(true)
+                }
+            } else {
+                Ok(false)
+            }
         } else {
             Ok(true)
         }
@@ -991,17 +1017,12 @@ HLi+/wQ5736LzHUphwOfBDZZ
 
         let mut rng = Rng(0);
 
-        let mut padded_image = [0; 4096];
-        padded_image[..IMAGE.len()].copy_from_slice(IMAGE);
-
-        let padded_image: &[u8] = &padded_image;
-
         embassy_futures::block_on(async {
             let signature = super::SBV2RsaSignatureBlock::sign(
                 &priv_key,
                 &mut rng,
                 &mut buf,
-                padded_image,
+                IMAGE,
                 ImageType::Bootloader,
                 AsyncIo(&mut out),
             )
