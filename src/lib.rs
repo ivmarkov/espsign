@@ -292,7 +292,7 @@ impl SBV2RsaPubKey {
         hasher.update(self.rsa_precalc_m);
     }
 
-    /// Create a new empty Secure Boot V2 RSA public key in unitialized state
+    /// Create a new empty Secure Boot V2 RSA public key in uninitialized state
     const fn new_empty() -> Self {
         Self {
             rsa_public_modulus: [0; 384],
@@ -314,12 +314,14 @@ impl SBV2RsaPubKey {
         let rr = 1.to_biguint().unwrap() << (pub_key.n().bits() * 2);
         let rinv = rr % pub_key.n();
 
+        // https://github.com/espressif/esptool/blob/6cc002c4bd0de6a5b1afa630a59c7cbaac44ab86/espsecure/__init__.py#L1066
         self.rsa_public_modulus
             .copy_from_slice(&pub_key.n().to_bytes_le());
         self.rsa_public_exponent
-            .copy_from_slice(&pub_key.e().to_u32().unwrap().to_le_bytes());
+            .copy_from_slice(&pub_key.e().to_i32().unwrap().to_le_bytes());
         self.rsa_precalc_r.copy_from_slice(&rinv.to_bytes_le());
-        self.rsa_precalc_m.copy_from_slice(&m.to_bytes_le().1); // TODO: What to do with the `Sign` component?
+        self.rsa_precalc_m
+            .copy_from_slice(&m.to_i32().unwrap().to_le_bytes());
     }
 }
 
@@ -649,7 +651,7 @@ impl SBV2RsaSignatureBlock {
         Ok(())
     }
 
-    /// Create an empty Secure Boot V2 RSA signature block in unitialized state
+    /// Create an empty Secure Boot V2 RSA signature block in uninitialized state
     const fn new_empty() -> Self {
         Self {
             magic: Self::MAGIC_BYTE,
