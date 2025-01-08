@@ -320,8 +320,7 @@ impl SBV2RsaPubKey {
         self.rsa_public_exponent
             .copy_from_slice(&pub_key.e().to_i32().unwrap().to_le_bytes());
         self.rsa_precalc_r.copy_from_slice(&rinv.to_bytes_le());
-        self.rsa_precalc_m
-            .copy_from_slice(&m.to_i32().unwrap().to_le_bytes());
+        self.rsa_precalc_m.copy_from_slice(&m.to_bytes_le().1); // TODO: What to do with the `Sign` component?
     }
 }
 
