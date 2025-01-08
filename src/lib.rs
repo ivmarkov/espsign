@@ -320,7 +320,8 @@ impl SBV2RsaPubKey {
         self.rsa_public_exponent
             .copy_from_slice(&pub_key.e().to_i32().unwrap().to_le_bytes());
         self.rsa_precalc_r.copy_from_slice(&rinv.to_bytes_le());
-        self.rsa_precalc_m.copy_from_slice(&m.to_bytes_le().1); // TODO: What to do with the `Sign` component?
+        self.rsa_precalc_m
+            .copy_from_slice(&((m.to_i64().unwrap() & 0xffffffff) as i32).to_le_bytes());
     }
 }
 
@@ -1034,8 +1035,8 @@ HLi+/wQ5736LzHUphwOfBDZZ
             assert_eq!(
                 &sha,
                 &[
-                    30, 21, 221, 150, 46, 88, 111, 119, 133, 133, 196, 203, 78, 206, 138, 61, 161,
-                    155, 150, 228, 98, 141, 122, 31, 230, 50, 91, 84, 133, 136, 157, 166
+                    66, 75, 181, 110, 45, 200, 254, 51, 193, 128, 186, 133, 116, 47, 246, 223, 131,
+                    205, 201, 187, 29, 16, 233, 45, 4, 113, 121, 145, 220, 211, 91, 77
                 ]
             );
 
