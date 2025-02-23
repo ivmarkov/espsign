@@ -850,7 +850,7 @@ impl SBV2RsaSignatureBlock {
         W: Write,
     {
         if let Some(write) = out.as_mut() {
-            write.write_all(data).await.map_err(Into::into)?;
+            write.write_all(data).await?;
         }
 
         hasher.update(data);
